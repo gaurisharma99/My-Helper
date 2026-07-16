@@ -42,6 +42,7 @@ const chatTitle = document.getElementById("chatTitle");
 const chatWindow = document.getElementById("chatWindow");
 const emptyState = document.getElementById("emptyState");
 const typingIndicator = document.getElementById("typingIndicator");
+const statusDot = document.getElementById("statusDot");
 
 const chatForm = document.getElementById("chatForm");
 const messageInput = document.getElementById("messageInput");
@@ -57,8 +58,80 @@ function generateId() {
 }
 
 /** Returns a friendly HH:MM timestamp, e.g. "3:42 PM". */
-function formatTime(date) {
+function formatTime(dateVal) {
+  const date = typeof dateVal === "string" || typeof dateVal === "number" ? new Date(dateVal) : dateVal;
   return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+/** Saves the current conversations and active conversation ID to localStorage. */
+function saveToLocalStorage() {
+  try {
+    localStorage.setItem("my_helper_conversations", JSON.stringify(state.conversations));
+    localStorage.setItem("my_helper_active_id", state.activeId);
+  } catch (error) {
+    console.error("Error saving state to localStorage:", error);
+  }
+}
+
+/** Loads conversations and active conversation ID from localStorage, restoring Date objects. */
+function loadFromLocalStorage() {
+  try {
+    const savedConvs = localStorage.getItem("my_helper_conversations");
+    const savedActiveId = localStorage.getItem("my_helper_active_id");
+
+    if (savedConvs) {
+      state.conversations = JSON.parse(savedConvs);
+      // Re-hydrate Date objects for message times
+      for (const id in state.conversations) {
+        const conv = state.conversations[id];
+        if (conv && Array.isArray(conv.messages)) {
+          conv.messages.forEach((msg) => {
+            if (msg.time) {
+              msg.time = new Date(msg.time);
+            }
+          });
+        }
+      }
+    }
+
+    if (savedActiveId && state.conversations[savedActiveId]) {
+      state.activeId = savedActiveId;
+    } else {
+      const ids = Object.keys(state.conversations);
+      if (ids.length > 0) {
+        state.activeId = ids[ids.length - 1];
+      }
+    }
+  } catch (error) {
+    console.error("Error loading state from localStorage:", error);
+  }
+}
+
+/** Probes the backend server's status and updates the UI indicator. */
+async function checkBackendConnection() {
+  if (statusDot) {
+    statusDot.className = "status-dot connecting";
+    statusDot.title = "Connecting...";
+  }
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/`, { method: "GET" });
+    if (response.ok) {
+      if (statusDot) {
+        statusDot.className = "status-dot online";
+        statusDot.title = "Connected";
+      }
+      return true;
+    }
+  } catch (error) {
+    // Failed to fetch or offline
+  }
+
+  if (statusDot) {
+    statusDot.className = "status-dot offline";
+    statusDot.title = "Disconnected";
+  }
+  return false;
 }
 
 /** Escapes HTML special characters to prevent injection when we
@@ -236,6 +309,7 @@ async function handleSendMessage(event) {
   conv.messages.push(userMessage);
   appendMessageToDOM(userMessage);
   toggleEmptyState();
+  saveToLocalStorage();
 
   // Clear + reset the composer immediately for a snappy feel.
   messageInput.value = "";
@@ -283,12 +357,20 @@ async function requestNovaReply(conv) {
 
 conv.messages.push(assistantMessage);
 appendMessageToDOM(assistantMessage);
+saveToLocalStorage();
   } catch (error) {
     // Network failure (backend not running) vs. a handled API error
     // both land here since we throw in both cases above.
     const friendly = error.message.includes("Failed to fetch")
       ? "Can't reach the Nova AI server. Is the backend running on port 5000?"
       : error.message;
+
+    if (error.message.includes("Failed to fetch")) {
+      if (statusDot) {
+        statusDot.className = "status-dot offline";
+        statusDot.title = "Disconnected";
+      }
+    }
 
     showToast(friendly, "error");
 
@@ -300,6 +382,7 @@ appendMessageToDOM(assistantMessage);
 
 conv.messages.push(errorBubble);
 appendMessageToDOM(errorBubble);
+saveToLocalStorage();
   } finally {
     setWaiting(false);
   }
@@ -329,6 +412,7 @@ function createConversation() {
   renderConversationList();
   renderActiveConversation();
   messageInput.focus();
+  saveToLocalStorage();
 }
 
 /** Re-renders the full sidebar list of conversations. */
@@ -347,6 +431,7 @@ function renderConversationList() {
       state.activeId = id;
       renderConversationList();
       renderActiveConversation();
+      saveToLocalStorage();
     });
     conversationList.appendChild(item);
   });
@@ -375,6 +460,7 @@ function clearActiveConversation() {
   toggleEmptyState();
   renderConversationList();
   showToast("Chat cleared.");
+  saveToLocalStorage();
 }
 
 // ---- 7. Event listeners & init ----------------------------------------
@@ -443,5 +529,15 @@ document.addEventListener("keydown", (e) => {
 });
 
 // ---- Init ----
-createConversation();
+loadFromLocalStorage();
+if (Object.keys(state.conversations).length === 0) {
+  createConversation();
+} else {
+  renderConversationList();
+  renderActiveConversation();
+}
 updateSendButtonState();
+
+// Live connection check
+checkBackendConnection();
+setInterval(checkBackendConnection, 15000);

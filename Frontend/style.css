@@ -345,8 +345,24 @@ kbd {
   width: 7px;
   height: 7px;
   border-radius: 50%;
+  background: var(--text-faint);
+  box-shadow: 0 0 8px var(--text-faint);
+  transition: background 0.3s var(--ease), box-shadow 0.3s var(--ease);
+}
+
+.status-dot.online {
   background: var(--success);
   box-shadow: 0 0 8px var(--success);
+}
+
+.status-dot.offline {
+  background: var(--danger);
+  box-shadow: 0 0 8px var(--danger);
+}
+
+.status-dot.connecting {
+  background: var(--nova-ember);
+  box-shadow: 0 0 8px var(--nova-ember);
 }
 
 /* ---- Message log ---- */
