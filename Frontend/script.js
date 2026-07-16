@@ -1,5 +1,5 @@
 // ================================================================
-// Nova AI — Frontend Logic
+// Helper AI — Frontend Logic
 // ================================================================
 // This file is organized into clearly labeled sections:
 //   1. Config & state
@@ -19,6 +19,11 @@
 // Where our Express backend lives. Change this if you deploy the
 // backend somewhere other than your local machine.
 const API_BASE_URL = "http://localhost:5000";
+
+// LocalStorage keys for persistence and backup
+const STORAGE_KEY = "my_helper_conversations";
+const ACTIVE_ID_KEY = "my_helper_active_id";
+const BACKUP_KEY = "my_helper_conversations_backup";
 
 // In-memory store for every conversation started this session.
 // Nothing is persisted to a database or localStorage on purpose -
@@ -42,7 +47,6 @@ const chatTitle = document.getElementById("chatTitle");
 const chatWindow = document.getElementById("chatWindow");
 const emptyState = document.getElementById("emptyState");
 const typingIndicator = document.getElementById("typingIndicator");
-const statusDot = document.getElementById("statusDot");
 
 const chatForm = document.getElementById("chatForm");
 const messageInput = document.getElementById("messageInput");
@@ -58,80 +62,8 @@ function generateId() {
 }
 
 /** Returns a friendly HH:MM timestamp, e.g. "3:42 PM". */
-function formatTime(dateVal) {
-  const date = typeof dateVal === "string" || typeof dateVal === "number" ? new Date(dateVal) : dateVal;
+function formatTime(date) {
   return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-}
-
-/** Saves the current conversations and active conversation ID to localStorage. */
-function saveToLocalStorage() {
-  try {
-    localStorage.setItem("my_helper_conversations", JSON.stringify(state.conversations));
-    localStorage.setItem("my_helper_active_id", state.activeId);
-  } catch (error) {
-    console.error("Error saving state to localStorage:", error);
-  }
-}
-
-/** Loads conversations and active conversation ID from localStorage, restoring Date objects. */
-function loadFromLocalStorage() {
-  try {
-    const savedConvs = localStorage.getItem("my_helper_conversations");
-    const savedActiveId = localStorage.getItem("my_helper_active_id");
-
-    if (savedConvs) {
-      state.conversations = JSON.parse(savedConvs);
-      // Re-hydrate Date objects for message times
-      for (const id in state.conversations) {
-        const conv = state.conversations[id];
-        if (conv && Array.isArray(conv.messages)) {
-          conv.messages.forEach((msg) => {
-            if (msg.time) {
-              msg.time = new Date(msg.time);
-            }
-          });
-        }
-      }
-    }
-
-    if (savedActiveId && state.conversations[savedActiveId]) {
-      state.activeId = savedActiveId;
-    } else {
-      const ids = Object.keys(state.conversations);
-      if (ids.length > 0) {
-        state.activeId = ids[ids.length - 1];
-      }
-    }
-  } catch (error) {
-    console.error("Error loading state from localStorage:", error);
-  }
-}
-
-/** Probes the backend server's status and updates the UI indicator. */
-async function checkBackendConnection() {
-  if (statusDot) {
-    statusDot.className = "status-dot connecting";
-    statusDot.title = "Connecting...";
-  }
-
-  try {
-    const response = await fetch(`${API_BASE_URL}/`, { method: "GET" });
-    if (response.ok) {
-      if (statusDot) {
-        statusDot.className = "status-dot online";
-        statusDot.title = "Connected";
-      }
-      return true;
-    }
-  } catch (error) {
-    // Failed to fetch or offline
-  }
-
-  if (statusDot) {
-    statusDot.className = "status-dot offline";
-    statusDot.title = "Disconnected";
-  }
-  return false;
 }
 
 /** Escapes HTML special characters to prevent injection when we
@@ -197,6 +129,63 @@ function renderMarkdown(rawText) {
   });
 
   return text;
+}
+
+// ---- 5. LocalStorage Persistence --------------------------------------------------
+/**
+ * Serialises the entire conversation state and stores it in localStorage.
+ * Before overwriting, the previous value is copied to a backup key.
+ */
+function saveToLocalStorage() {
+  try {
+    const existing = localStorage.getItem(STORAGE_KEY);
+    if (existing !== null) {
+      localStorage.setItem(BACKUP_KEY, existing);
+    }
+    const payload = JSON.stringify({
+      conversations: state.conversations,
+      activeId: state.activeId,
+    });
+    localStorage.setItem(STORAGE_KEY, payload);
+    localStorage.setItem(ACTIVE_ID_KEY, state.activeId || "");
+  } catch (e) {
+    console.error("Failed to save to localStorage", e);
+  }
+}
+
+/**
+ * Loads persisted conversation data (if any) and populates the in‑memory `state`.
+ * Returns `true` if data was successfully loaded, otherwise `false`.
+ */
+function loadFromLocalStorage() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (!saved) return false;
+    const { conversations, activeId } = JSON.parse(saved);
+    if (typeof conversations === "object" && conversations !== null) {
+      state.conversations = conversations;
+      state.activeId = activeId;
+      // Restore Date objects for message timestamps
+      Object.values(state.conversations).forEach(conv => {
+        if (Array.isArray(conv.messages)) {
+          conv.messages.forEach(msg => {
+            if (msg.time && typeof msg.time === "string") {
+              const parsed = new Date(msg.time);
+              if (!isNaN(parsed)) msg.time = parsed;
+            }
+          });
+        }
+      });
+      // Render UI based on loaded data
+      renderConversationList();
+      renderActiveConversation();
+      updateSendButtonState();
+      return true;
+    }
+  } catch (e) {
+    console.error("Failed to load from localStorage", e);
+  }
+  return false;
 }
 
 // ---- 4. Rendering --------------------------------------------------
@@ -308,24 +297,25 @@ async function handleSendMessage(event) {
   const userMessage = { role: "user", content: text, time: new Date() };
   conv.messages.push(userMessage);
   appendMessageToDOM(userMessage);
-  toggleEmptyState();
+  // Persist after adding user message
   saveToLocalStorage();
+  toggleEmptyState();
 
   // Clear + reset the composer immediately for a snappy feel.
   messageInput.value = "";
   autoResizeTextarea();
   updateSendButtonState();
 
-  await requestNovaReply(conv);
+  await requestHelperReply(conv);
 }
 
 /** Calls the backend's POST /chat endpoint and renders the reply. */
-async function requestNovaReply(conv) {
+async function requestHelperReply(conv) {
   setWaiting(true);
 
   try {
     // Send recent history (minus the message we just added, which
-    // the backend appends itself) so Nova has short-term memory
+    // the backend appends itself) so Helper has short-term memory
     // during this session. We cap history length to keep payloads
     // small and stay within the model's context window.
     const history = conv.messages
@@ -350,27 +340,21 @@ async function requestNovaReply(conv) {
     }
 
     const assistantMessage = {
-    role: "assistant",
-    content: data.reply,
-    time: new Date()
-};
+      role: "assistant",
+      content: data.reply,
+      time: new Date()
+    };
 
-conv.messages.push(assistantMessage);
-appendMessageToDOM(assistantMessage);
-saveToLocalStorage();
+    conv.messages.push(assistantMessage);
+    appendMessageToDOM(assistantMessage);
+    // Persist after receiving assistant reply
+    saveToLocalStorage();
   } catch (error) {
     // Network failure (backend not running) vs. a handled API error
     // both land here since we throw in both cases above.
     const friendly = error.message.includes("Failed to fetch")
-      ? "Can't reach the Nova AI server. Is the backend running on port 5000?"
+      ? "Can't reach the Helper AI server. Is the backend running on port 5000?"
       : error.message;
-
-    if (error.message.includes("Failed to fetch")) {
-      if (statusDot) {
-        statusDot.className = "status-dot offline";
-        statusDot.title = "Disconnected";
-      }
-    }
 
     showToast(friendly, "error");
 
@@ -382,7 +366,8 @@ saveToLocalStorage();
 
 conv.messages.push(errorBubble);
 appendMessageToDOM(errorBubble);
-saveToLocalStorage();
+  // Persist after adding error message
+  saveToLocalStorage();
   } finally {
     setWaiting(false);
   }
@@ -412,6 +397,7 @@ function createConversation() {
   renderConversationList();
   renderActiveConversation();
   messageInput.focus();
+  // Persist new conversation
   saveToLocalStorage();
 }
 
@@ -431,7 +417,6 @@ function renderConversationList() {
       state.activeId = id;
       renderConversationList();
       renderActiveConversation();
-      saveToLocalStorage();
     });
     conversationList.appendChild(item);
   });
@@ -459,8 +444,9 @@ function clearActiveConversation() {
   chatWindow.querySelectorAll(".message-row").forEach((el) => el.remove());
   toggleEmptyState();
   renderConversationList();
-  showToast("Chat cleared.");
+  // Persist after clearing conversation
   saveToLocalStorage();
+  showToast("Chat cleared.");
 }
 
 // ---- 7. Event listeners & init ----------------------------------------
@@ -529,15 +515,7 @@ document.addEventListener("keydown", (e) => {
 });
 
 // ---- Init ----
-loadFromLocalStorage();
-if (Object.keys(state.conversations).length === 0) {
+if (!loadFromLocalStorage()) {
   createConversation();
-} else {
-  renderConversationList();
-  renderActiveConversation();
 }
 updateSendButtonState();
-
-// Live connection check
-checkBackendConnection();
-setInterval(checkBackendConnection, 15000);

@@ -40,7 +40,7 @@ app.post("/chat", async (req, res) => {
     {
         role: "system",
         content:
-            "You are Nova AI, a friendly, intelligent and professional AI assistant."
+            "You are Helper AI, a friendly, intelligent and professional AI assistant."
     },
 
     ...history.map(msg => ({

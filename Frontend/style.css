@@ -518,10 +518,29 @@ kbd {
   background: #0d0f18;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-  padding: 14px 14px 14px;
+  padding: 10px 14px 14px;
   overflow-x: auto;
   margin: 8px 0;
 }
+
+/* Code block header */
+.code-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding-bottom: 6px;
+  font-size: 11px;
+  color: var(--text-faint);
+  font-family: var(--font-body);
+}
+
+
+
+
+
+
 
 .bubble pre code {
   background: none;
