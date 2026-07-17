@@ -25,6 +25,8 @@ const STORAGE_KEY = "my_helper_conversations";
 const ACTIVE_ID_KEY = "my_helper_active_id";
 const BACKUP_KEY = "my_helper_conversations_backup";
 
+let currentAudio = null;
+
 // In-memory store for every conversation started this session.
 // Nothing is persisted to a database or localStorage on purpose -
 // this keeps the demo simple and avoids storing chat data in the
@@ -347,6 +349,34 @@ async function requestHelperReply(conv) {
 
     conv.messages.push(assistantMessage);
     appendMessageToDOM(assistantMessage);
+    const audioResponse = await fetch(`${API_BASE_URL}/tts`, {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    text: data.reply,
+  }),
+});
+
+if (audioResponse.ok) {
+  const audioBlob = await audioResponse.blob();
+  const audioUrl = URL.createObjectURL(audioBlob);
+
+  if (currentAudio) {
+  currentAudio.pause();
+  currentAudio.currentTime = 0;
+}
+
+currentAudio = new Audio(audioUrl);
+currentAudio.play().catch(console.error);
+
+currentAudio.onended = () => {
+  URL.revokeObjectURL(audioUrl);
+  currentAudio = null;
+};
+
+}
     // Persist after receiving assistant reply
     saveToLocalStorage();
   } catch (error) {
