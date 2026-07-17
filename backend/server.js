@@ -2,11 +2,14 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import Groq from "groq-sdk";
+import ttsRouter from "./routes/tts.js";
 
-dotenv.config();
-
+dotenv.config({ path: ".env" });
+console.log("dotenv result:", dotenv.config({ path: ".env" }));
+console.log("PIPER_MODEL_PATH:", process.env.PIPER_MODEL_PATH);
 const app = express();
 const PORT = process.env.PORT || 5000;
+
 
 if (!process.env.GROQ_API_KEY) {
     console.error("❌ GROQ_API_KEY not found inside .env");
@@ -19,6 +22,7 @@ const groq = new Groq({
 
 app.use(cors());
 app.use(express.json());
+app.use("/tts", ttsRouter);
 
 app.get("/", (req, res) => {
     res.send("🚀 Groq Backend Running");
